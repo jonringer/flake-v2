@@ -29,11 +29,11 @@ This document is to propose a less awkward way to do flake evaluation.
   };
 
   # Attrset of modules
-  modules = import ./nixos;
+  nixosModules = import ./nixos;
 
   nixosConfigurations = { self }: {
     default = self.inputs.nixpkgs.lib.nixosSystem {
-      modules = [ self.modules.default ];
+      modules = [ self.nixosModules.default ];
     };
   };
 
@@ -44,8 +44,9 @@ This document is to propose a less awkward way to do flake evaluation.
   ];
 
   # Optional explicit import of nixpkgs, allows for further customization
-  pkgsForSystem = { self }:
+  pkgsForSystem = { self, system }:
     import self.inputs.nixpkgs {
+      inherit system;
       config = self.pkgsConfig;
       overlays = self.pkgsOverlays;
     };
@@ -61,7 +62,7 @@ This document is to propose a less awkward way to do flake evaluation.
     app.default = myPackage;
     app.other = "${myPackage}/bin/other-bin";
 
-    devShell.default = mkShell {
+    devShells.default = mkShell {
       inputsFrom = [
         myPackage
       ];
@@ -81,7 +82,6 @@ This document is to propose a less awkward way to do flake evaluation.
 ## Minimal Example
 ```nix
 {
-
   description = "Minimal better flake";
 
   inputs.nixpkgs.url = "github:nixos/nixpkgs/unstable";
@@ -93,7 +93,7 @@ This document is to propose a less awkward way to do flake evaluation.
 
   outputs = { pkgs }: with pkgs; {
     packages.default = myPackage;
-    devShell.default = mkShell { inputsFrom = [ myPackage ]; };
+    devShells.default = mkShell { inputsFrom = [ myPackage ]; };
   };
 }
 ```
