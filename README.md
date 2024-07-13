@@ -108,7 +108,7 @@ flake = let
   pkgsConfig = if raw ? pkgsConfig then pkgsConfig { self = raw; } else { };
   pkgsOverlays = if raw ? pkgsOverlays then pkgsOverlays { self = raw; } else [ ];
   # Replace pkgsConfig and pkgsOverlays functions with their arguments applied results
-  callRawFlake = callPackageWith (raw // { inherit pkgsConfig pkgsOverlays; });
+  callRawFlake = callPackageWith (raw // { inherit pkgsConfig pkgsOverlays; self = raw; });
 
   mkFlake = {
     self,
