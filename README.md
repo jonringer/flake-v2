@@ -31,31 +31,37 @@ This document is to propose a less awkward way to do flake evaluation.
   # Attrset of modules
   modules = import ./nixos;
 
-  nixosConfigurations = { inputs, self }: {
-    default = inputs.nixpkgs.lib.nixosSystem {
+  nixosConfigurations = { self }: {
+    default = self.inputs.nixpkgs.lib.nixosSystem {
       modules = [ self.modules.default ];
     };
   };
 
-  pkgsForSystem = { nixpkgs, system, self }:
-    import nixpkgs {
-      inherit system;
-      config = { allowUnfree = true; cudaSupport = true; };
-      overlays = [ input2.overlays.default self.overlays.default ];
+  pkgsConfig = { allowUnfree = true; cudaSupport = true; };
+  pkgsOverlays = { self, overlays }: [
+    self.inputs.foo.overlays.default
+    self.overlays.default
+  ];
+
+  # Optional explicit import of nixpkgs, allows for further customization
+  pkgsForSystem = { self }:
+    import self.inputs.nixpkgs {
+      config = self.pkgsConfig;
+      overlays = self.pkgsOverlays;
     };
 
-  outputsForSystem = { nixpkgs, pkgs, self }: {
-    formatter = pkgs.nixpkgs-fmt;
+  outputs = { pkgs, ... }: with pkgs; {
+    formatter = nixpkgs-fmt;
 
-    checks.default = pkgs.myPackage;
+    checks.default = myPackage;
 
-    packages.default = pkgs.myPackage;
+    packages.default = myPackage;
 
     # Instead of using { type = app; program = <store path>;}, just use <store path>
-    app.default = pkgs.myPackage;
-    app.other = "${pkgs.myPackage}/bin/other-bin";
+    app.default = myPackage;
+    app.other = "${myPackage}/bin/other-bin";
 
-    devShell.default = pkgs.mkShell { name = "dev"; inputsFrom = [ pkgs.myPackage ]; };
+    devShell.default = mkShell { name = "dev"; inputsFrom = [ myPackage ]; };
   }
 
   # These can just import a whole directory from a path
@@ -69,36 +75,48 @@ This document is to propose a less awkward way to do flake evaluation.
 
   description = "Minimal better flake";
 
-  inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/unstable";
-  };
+  inputs.nixpkgs.url = "github:nixos/nixpkgs/unstable";
 
-  overlays = {
-    default = import ./nix/overlay.nix;
-  };
+  # Overlay defines myPackage
+  overlays.default = import ./nix/overlay.nix;
 
-  pkgsForSystem = { nixpkgs, system, self }:
-    import nixpkgs {
-      inherit system;
-      overlays = [ self.overlays.default ];
-    };
-
-  outputsForSystem = { nixpkgs, pkgs, self }: {
-    packages.default = pkgs.myPackage;
-    devShell.default = pkgs.mkShell { name = "dev"; inputsFrom = [ pkgs.myPackage ]; };
+  outputs = { pkgs }: with pkgs; {
+    packages.default = myPackage;
+    devShell.default = mkShell { name = "dev"; inputsFrom = [ myPackage ]; };
   }
+}
+
+# nix/overlay.nix
+final: prev: {
+  myPackage = final.callPackage ./package.nix { };
 }
 ```
 
 The evaluation of these results would roughly be:
 ```nix
+# The ? here is that these could be optionally imported if defined
 flake = let
+  # Initial import with unknown attrs defined, inputs would also need to be resolved as part of this "import"
   raw = import ./flake.nix;
-  self = { inherit (raw) inputs overlay modules nixosConfigurations; };
-  systemInputs = inputs // { system = builtins.getCurrentSystem; inherit self; };
-  pkgs = raw.pkgsForSystem systemInputs;
-  systemOutputs = raw.outputsForSystem (systemInputs // { inherit pkgs; });
-  final = systemOutputs // self // { self = final; };
+  # Evaluate enough to get a nixpkgs import
+  pkgsConfig = if raw ? pkgsConfig then pkgsConfig { self = raw; } else { };
+  pkgsOverlays = if raw ? pkgsOverlays then pkgsOverlays { self = raw; } else [ ];
+  # Replace pkgsConfig and pkgsOverlays functions with their arguments applied results
+  callRawFlake = callPackageWith (raw // { inherit pkgsConfig pkgsOverlays; });
+
+  mkFlake = {
+    self,
+    pkgsConfig,
+    pkgsOverlays,
+    # Could be defined by user, but if not, do an expected import
+    pkgsForSystem ? { self, system }: import self.inputs.nixpkgs { config = pkgsConfig; overlays = pkgsOverlays;);
+  }: let
+    pkgs = pkgsForSystem { inherit self; system = builtins.getCurrentSystem; };
+    # TODO: nixosConfigurations and other attrs would optinally need to be called if they're functions and present
+  in raw.outputs pkgs // { inherit pkgsConfig pkgsOverlays; };
+
+  # Create self fixed point, and pass as flake output
+  final = raw // (callRawFlake mkFlake) // { self = final; };
 in
   final
 ```
