@@ -61,8 +61,17 @@ This document is to propose a less awkward way to do flake evaluation.
     app.default = myPackage;
     app.other = "${myPackage}/bin/other-bin";
 
-    devShell.default = mkShell { name = "dev"; inputsFrom = [ myPackage ]; };
-  }
+    devShell.default = mkShell {
+      inputsFrom = [
+        myPackage
+      ];
+      nativeBuildInputs = [
+        cmake-lint
+      ] ++ pkgs.lib.optionals stdenv.isLinux [
+        gdb
+      ];
+    };
+  };
 
   # These can just import a whole directory from a path
   templates.default = ./templates/default;
@@ -78,17 +87,14 @@ This document is to propose a less awkward way to do flake evaluation.
   inputs.nixpkgs.url = "github:nixos/nixpkgs/unstable";
 
   # Overlay defines myPackage
-  overlays.default = import ./nix/overlay.nix;
+  overlays.default = final: prev: {
+    myPackage = final.callPackage ./package.nix { };
+  };
 
   outputs = { pkgs }: with pkgs; {
     packages.default = myPackage;
-    devShell.default = mkShell { name = "dev"; inputsFrom = [ myPackage ]; };
-  }
-}
-
-# nix/overlay.nix
-final: prev: {
-  myPackage = final.callPackage ./package.nix { };
+    devShell.default = mkShell { inputsFrom = [ myPackage ]; };
+  };
 }
 ```
 
